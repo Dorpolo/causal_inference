@@ -1,0 +1,206 @@
+---
+title: "HW2"
+author: "Dor Polovincik & Elad Alon"
+date: "21/4/2021"
+output:
+  rmarkdown::html_document:
+    theme: lumen
+---
+
+
+```{r setup, include=FALSE}
+
+# install required packages
+list.of.packages <- c('dplyr', 'ggplot2', 'ggcharts', 'reshape2', 'purrr', 'formattable')
+
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+
+if(length(new.packages)) install.packages(new.packages)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(formattable)
+library(ggcharts)
+
+data <- read.csv('~/Desktop/private/TAU/tau_stats/data/rhc.csv', header = T, sep = ';')
+rhc_data <- data %>% 
+  mutate(
+    death = as.integer(gsub(',', '', death)),
+    X = NULL)
+```
+
+
+# Question 5c
+## ATT Estimation
+
+### Definitions 
+
+ * Term A = E[Y|A=1]
+ * Term B = E[E(Y|A=0,X) | A=1]
+
+$$
+P(X=1|A=1) = \frac{P(X=1, A=1)}{P(A=1)}
+$$
+
+$$
+P(X=0|A=1) = \frac{P(X=0, A=1)}{P(A=1)}
+$$
+
+```{r 5c1,  fig.height=6, fig.width=7, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+
+extract_values <- function(data){
+     output <- data %>%
+           summarise(
+              p_x0_given_a1 = sum(death[treatment == 1 & sepsis == 0])/sum(death[treatment == 1]),
+              p_x1_given_a1 = sum(death[treatment == 1 & sepsis == 1])/sum(death[treatment == 1]),
+              term_a1 = mean(death[treatment == 1 & sepsis == 0])*p_x0_given_a1,
+              term_a2 = mean(death[treatment == 1 & sepsis == 1])*p_x1_given_a1,
+              term_a = term_a1 + term_a2,
+              term_b1 = mean(death[treatment == 0 & sepsis == 0])*p_x0_given_a1,
+              term_b2 = mean(death[treatment == 0 & sepsis == 1])*p_x1_given_a1,
+              term_b = term_b1 + term_b2,
+              ATT = term_a - term_b) %>% 
+              select(p_x0_given_a1, p_x1_given_a1, term_a, term_b, ATT)
+  return(output)
+}
+
+att_kpis <- extract_values(rhc_data) 
+
+formattable(att_kpis, align =rep('c', ncol(att_kpis)), 
+            list(
+              `ATT`= color_tile('green', 'pink'),
+              `p_x0_given_a1`= color_bar('#FADA5E'),
+              `p_x1_given_a1`= color_bar('#FADA5E')
+            ))
+
+ATT_ESTIMATOR = att_kpis$ATT
+
+```
+
+* ATT Estimator =   **__`r ATT_ESTIMATOR`__**.
+
+### 95% Confidence Interval for ATT - Bootstrap
+```{r 5c2,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+B = 1000
+N = nrow(rhc_data)
+ATT_boot = rep(0, B)
+alpha = 0.05
+
+
+boot_it <- function(N){
+  index = sample(x = 1:N, size = N, replace = T)
+  df <- extract_values(data[index,])
+  return(df$ATT)
+}
+
+boot_res = sapply(rep(N, B), boot_it)
+sd_boot = sd(boot_res)
+ATT_est_interval = ATT_ESTIMATOR + c(-1, 1)*qnorm(1-(alpha/2))*sd_boot
+lower_bound = quantile(x = boot_res, probs = alpha/2)
+upper_bound = quantile(x = boot_res, probs = 1-(alpha/2))
+
+df_ci1 = tibble(upper = ATT_est_interval[2], lower = ATT_est_interval[1]) %>% 
+  melt() %>% mutate(type = 'Asymptotic')
+
+df_ci2 =  tibble(upper = upper_bound, lower = lower_bound) %>% 
+  melt() %>% mutate(type = 'Percentile')
+
+df_ci = rbind(df_ci1, df_ci2)
+
+tibble(res=boot_res) %>% 
+  ggplot(aes(x=res)) +
+  geom_density(fill= 'pink') + 
+  theme_ggcharts() +   
+  geom_vline(data=df_ci, mapping = aes(xintercept=value, col=type)) +
+  labs(title = 'ATT Estimator',
+       subtitle = 'Bootstrapped Results Distribution',
+       col = 'CI Type',
+       x = 'ATT Esttimator')
+
+```
+
+#### Confidence Interval: 
+
+    * **Percentile**:
+      1. Lower = **__`r lower_bound`__**
+      2. Upper = **__`r upper_bound`__**
+      3. Length = **__`r upper_bound-lower_bound`__**
+    
+  * **Asymptotic**:
+    1. Lower = **__`r ATT_est_interval[1]`__**
+    2. Upper = **__`r ATT_est_interval[2]`__**
+    3. Length = **__`r ATT_est_interval[2]-ATT_est_interval[1]`__**
+
+# Question 6
+## Data Simulations - b, c, d
+
+```{r 6a,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+library(optmatch)
+library(MatchIt)
+
+set.seed(10)
+
+calc_it <- function(x){
+  # b1
+  x = rnorm(n = 500, mean = 0, sd = 1)
+  v = rnorm(n = 500, mean = 0, sd = 1)
+  beta = list(`0` = 100, `1` = 2, `2` = 3.5, `3` = 5)
+  sigma = 3
+  eps = rnorm(n = 500, mean = 0, sd = sigma)
+  
+  y0 = beta$`0` + beta$`1`*0 + beta$`2`*x + beta$`3`*v + eps
+  y1 = beta$`0` + beta$`1`*1 + beta$`2`*x + beta$`3`*v + eps
+  
+  # b2
+  gamma = list(`0` = log(0.25), `1` = log(2))
+  p = (exp(gamma$`0` + gamma$`1`*x)) / (1+exp(gamma$`0` + gamma$`1`*x))
+  a = rbinom(n = 500, size = 1, prob = p)
+  
+  # b3
+  y = rep(NA, 500)
+  y[which(a==0)] = y0[which(a==0)]
+  y[which(a==1)] = y0[which(a==1)]
+  
+  # c1
+  ATE_naive = mean(y[which(a==1)]) - mean(y[which(a==0)])
+  
+  # c2
+  df_sim = as_tibble(cbind(y, a, x, v))
+  matching_opt_ps <- MatchIt::matchit(formula = a ~ x + v, method = 'optimal', distance = 'logit', data = df_sim)
+  matched_data_opt_ps = match.data(matching_opt_ps)
+  
+  # c3
+  ATE_matching_opt_ps = (matched_data_opt_ps %>% 
+    summarise(diff = mean(y[a==1]) - mean(y[a==0])))$diff
+  
+  # c4
+  lm_ax = lm(formula = y ~ a + x, data = matched_data_opt_ps)
+  ATE_lm_ax = coef(lm_ax)[2]
+  
+  # c5
+  lm_axv = lm(formula = y ~ a + x + v, data = matched_data_opt_ps)
+  ATE_lm_axv = coef(lm_axv)[2]
+  
+  return(c(ATE_naive, ATE_matching_opt_ps, ATE_lm_ax, ATE_lm_axv))
+}
+
+res = sapply(rep(0, 1000), calc_it)
+res_data = as_tibble(t(res))
+names(res_data) = c('Naive', 'Matching Optimal, PS', 'LM: Y ~ A + X', 'LM: Y ~ A + X + V')
+output = res_data %>% melt() %>% group_by(variable) %>% summarise(Mean = mean(value), SD = sd(value))
+
+formattable(output, align =rep('c', ncol(output)), 
+            list(
+              `Mean`= color_bar('#FADA5E'),
+              `SD`= color_bar('#FADA5E')
+            ))
+
+res_data %>% melt() %>% 
+  ggplot(aes(x=value, fill=variable)) +
+  geom_density() + 
+  theme_ggcharts() +   
+  labs(title = 'Simulated Results',
+       subtitle = 'Distribution by Model',
+       fill = 'Model') + 
+  theme(legend.position = 'right') 
+```

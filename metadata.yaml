@@ -1,0 +1,20 @@
+description:
+  prolog:  The Right Heart Catheterization (RHC) dataset was used in Connors et al. (1996).
+                The effectiveness of RHC in the initial care of critically ill patients. J American
+                Medical Association 276:889-897. The dataset pertains to day 1 of hospitalization,
+                i.e., the "treatment" variable is whether or not a patient received a RHC (also 
+                called the Swan-Ganz catheter) on the first day in which the patient qualified 
+                for the study. 
+data:
+  columns:
+    ARF: Acute respiratory failure
+    CHF: Congestive Heart Failure
+    Cirr:      Cirrhosis (liver failure)
+    colcan:  Colon cancer
+    Coma:      Coma
+    lungcan:   Lung cancer
+    MOSF:    Multiple Organ System Failure 
+    sepsis:    Multiple Organ System Failure with sepsis
+    meanbp1:   Mean blood pressure
+    treatment: Patient received Right Heart Catheterization (RHC)
+    death:     death at any time up to 6 months after day 1 of hospitalization

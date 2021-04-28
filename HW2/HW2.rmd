@@ -1,34 +1,102 @@
 ---
 title: "HW2"
-author: "Dor Polovincik & Elad Alon"
-date: "21/4/2021"
+author: "Elad Alon & Dor Polovincik"
+date: "28/4/2021"
 output:
   rmarkdown::html_document:
-    theme: lumen
+    theme: cosmo
 ---
 
 
 ```{r setup, include=FALSE}
 
 # install required packages
-list.of.packages <- c('dplyr', 'ggplot2', 'ggcharts', 'reshape2', 'purrr', 'formattable')
-
+list.of.packages <- c('dplyr', 'ggplot2', 'ggcharts', 'reshape2','purrr',
+                      'formattable', 'gridExtra', 'optmatch', 'MatchIt')
 new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
-
 if(length(new.packages)) install.packages(new.packages)
+library(gridExtra)
 library(dplyr)
 library(ggplot2)
 library(reshape2)
 library(formattable)
 library(ggcharts)
+library(optmatch)
+library(MatchIt)
 
 data <- read.csv('~/Desktop/private/TAU/tau_stats/data/rhc.csv', header = T, sep = ';')
 rhc_data <- data %>% 
-  mutate(
-    death = as.integer(gsub(',', '', death)),
-    X = NULL)
+  mutate(death = as.integer(gsub(',', '', death)),
+         meanbp1 = as.numeric(gsub(',', '', meanbp1)),
+         age = as.numeric(gsub(',', '', age))/(10^7),
+         X = NULL,
+         gender = factor(female, levels = c(0,1), labels = c('Male', 'Female')),
+         labeled_trt = factor(treatment, levels = c(0,1), labels = c('Untreated', 'Treated')),
+         id = row_number())
 ```
 
+# Question 4
+
+```{r 4,  fig.height=4, fig.width=8, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+plot1 <- ggplot(rhc_data, aes(x=female, y=treatment)) + 
+  geom_jitter(size=1, alpha=0.2, height = 0.05) +
+  stat_smooth(method="loess", colour="blue", size=1.5) +
+  labs(title = 'Visual Check',
+       subtitle = 'Female vs. Treatment',
+       x='Female',
+       y='Treatmemt') + 
+  theme_ggcharts()
+
+lr.prop_score <- glm(
+  treatment ~ female + ARF + age + sepsis, 
+  data = rhc_data, 
+  family = 'binomial')
+
+pred.prop_score <- predict(lr.prop_score, rhc_data, type = 'response') %>%
+  as.vector()
+
+plot2 <- ggplot(rhc_data, aes(x=age, y=death)) + 
+  geom_jitter(size=1, alpha=0.2, height = 0.05) +
+  stat_smooth(method="loess", colour="blue", size=1.5) +
+  labs(title = 'Visual Check',
+       subtitle = 'Age vs. Death',
+       x = 'Age',
+       y = 'Death') + 
+  theme_ggcharts()
+
+lr.y_untreated <- glm(
+  death ~ female + ARF + age + sepsis, 
+  data = rhc_data %>% filter(treatment == 0), 
+  family = 'binomial')
+
+lr.y_treated <- glm(
+  death ~ female + ARF + age + sepsis, 
+  data = rhc_data %>% filter(treatment == 1), 
+  family = 'binomial')
+
+pred.y_untreated <- predict(lr.y_untreated, rhc_data, type = 'response') %>%
+  as.vector()
+
+pred.y_treated <- predict(lr.y_treated, rhc_data, type = 'response') %>%
+  as.vector()
+
+doubly_robust_estimator = mean(
+  ((rhc_data$treatment * rhc_data$death) - 
+    (rhc_data$treatment - pred.prop_score) * pred.y_treated) 
+  / pred.prop_score) -
+  mean(
+    (((1 - rhc_data$treatment) * rhc_data$death) - 
+       (rhc_data$treatment - pred.prop_score) * pred.y_untreated) 
+    / (1 - pred.prop_score)
+    )
+
+grid.arrange(plot1, plot2, ncol=2)
+```
+
+#### Doubly Robust Estimator:  
+  * Output: **__`r doubly_robust_estimator`__**.
+
+--- 
 
 # Question 5c
 ## ATT Estimation
@@ -39,11 +107,11 @@ rhc_data <- data %>%
  * Term B = E[E(Y|A=0,X) | A=1]
 
 $$
-P(X=1|A=1) = \frac{P(X=1, A=1)}{P(A=1)}
+Pr(X=1|A=1) = \frac{Pr(X=1, A=1)}{Pr(A=1)}
 $$
 
 $$
-P(X=0|A=1) = \frac{P(X=0, A=1)}{P(A=1)}
+Pr(X=0|A=1) = \frac{Pr(X=0, A=1)}{Pr(A=1)}
 $$
 
 ```{r 5c1,  fig.height=6, fig.width=7, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
@@ -65,6 +133,7 @@ extract_values <- function(data){
 }
 
 att_kpis <- extract_values(rhc_data) 
+ATT_ESTIMATOR = att_kpis$ATT
 
 formattable(att_kpis, align =rep('c', ncol(att_kpis)), 
             list(
@@ -72,8 +141,6 @@ formattable(att_kpis, align =rep('c', ncol(att_kpis)),
               `p_x0_given_a1`= color_bar('#FADA5E'),
               `p_x1_given_a1`= color_bar('#FADA5E')
             ))
-
-ATT_ESTIMATOR = att_kpis$ATT
 
 ```
 
@@ -131,15 +198,12 @@ tibble(res=boot_res) %>%
     2. Upper = **__`r ATT_est_interval[2]`__**
     3. Length = **__`r ATT_est_interval[2]-ATT_est_interval[1]`__**
 
+---
+
 # Question 6
-## Data Simulations - b, c, d
+### Data Simulations - b, c, d
 
 ```{r 6a,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
-library(optmatch)
-library(MatchIt)
-
-set.seed(10)
-
 calc_it <- function(x){
   # b1
   x = rnorm(n = 500, mean = 0, sd = 1)
@@ -147,60 +211,408 @@ calc_it <- function(x){
   beta = list(`0` = 100, `1` = 2, `2` = 3.5, `3` = 5)
   sigma = 3
   eps = rnorm(n = 500, mean = 0, sd = sigma)
-  
+
   y0 = beta$`0` + beta$`1`*0 + beta$`2`*x + beta$`3`*v + eps
   y1 = beta$`0` + beta$`1`*1 + beta$`2`*x + beta$`3`*v + eps
-  
+
   # b2
   gamma = list(`0` = log(0.25), `1` = log(2))
   p = (exp(gamma$`0` + gamma$`1`*x)) / (1+exp(gamma$`0` + gamma$`1`*x))
   a = rbinom(n = 500, size = 1, prob = p)
-  
+
   # b3
   y = rep(NA, 500)
   y[which(a==0)] = y0[which(a==0)]
-  y[which(a==1)] = y0[which(a==1)]
-  
+  y[which(a==1)] = y1[which(a==1)]
+
   # c1
   ATE_naive = mean(y[which(a==1)]) - mean(y[which(a==0)])
-  
+
   # c2
   df_sim = as_tibble(cbind(y, a, x, v))
   matching_opt_ps <- MatchIt::matchit(formula = a ~ x + v, method = 'optimal', distance = 'logit', data = df_sim)
   matched_data_opt_ps = match.data(matching_opt_ps)
-  
+
   # c3
-  ATE_matching_opt_ps = (matched_data_opt_ps %>% 
+  ATE_matching_opt_ps = (matched_data_opt_ps %>%
     summarise(diff = mean(y[a==1]) - mean(y[a==0])))$diff
-  
+
   # c4
   lm_ax = lm(formula = y ~ a + x, data = matched_data_opt_ps)
   ATE_lm_ax = coef(lm_ax)[2]
-  
+
   # c5
   lm_axv = lm(formula = y ~ a + x + v, data = matched_data_opt_ps)
   ATE_lm_axv = coef(lm_axv)[2]
-  
+
   return(c(ATE_naive, ATE_matching_opt_ps, ATE_lm_ax, ATE_lm_axv))
 }
-
-res = sapply(rep(0, 1000), calc_it)
-res_data = as_tibble(t(res))
-names(res_data) = c('Naive', 'Matching Optimal, PS', 'LM: Y ~ A + X', 'LM: Y ~ A + X + V')
-output = res_data %>% melt() %>% group_by(variable) %>% summarise(Mean = mean(value), SD = sd(value))
-
-formattable(output, align =rep('c', ncol(output)), 
-            list(
-              `Mean`= color_bar('#FADA5E'),
-              `SD`= color_bar('#FADA5E')
-            ))
-
-res_data %>% melt() %>% 
-  ggplot(aes(x=value, fill=variable)) +
-  geom_density() + 
-  theme_ggcharts() +   
-  labs(title = 'Simulated Results',
-       subtitle = 'Distribution by Model',
-       fill = 'Model') + 
-  theme(legend.position = 'right') 
+run_analysis <- function(N){
+  res <- sapply(rep(0, N), calc_it)
+  res_data <- as_tibble(t(res))
+  names(res_data) = c('Naive', 'Matching Optimal, PS', 'LM: Y ~ A + X', 'LM: Y ~ A + X + V')
+  output <- res_data %>% melt() %>% group_by(variable) %>% summarise(Mean = mean(value), SD = sd(value))
+  output_1 <- formattable(output, align =rep('c', ncol(output)),
+                  list(
+                    `Mean`= color_bar('#FADA5E'),
+                    `SD`= color_bar('#FADA5E')
+                  ))
+  output_2 <- res_data %>% melt() %>%
+                ggplot(aes(x=value, fill=variable)) +
+                geom_density() +
+                theme_ggcharts() +
+                labs(title = 'Simulated Results',
+                     subtitle = 'Distribution by Model',
+                     fill = 'Model') +
+                theme(legend.position = 'right')
+  return(list(table = output_1, plot = output_2))
+}
+exec <- run_analysis(1000)
+exec$table
+exec$plot
 ```
+
+### Interpretation
+  1. Are all estimators unbiased? 
+      + First, let's recap:
+          - ATE = beta1
+          - beta1 defined as 2 
+      + The Naive estimator is biased. Therefore, although all other estimators really close to their expected value, not all estimators are unbiased.
+      
+      
+  2. The best estimator is `LM: Y ~ A + X`, due to its relatively low sd and value that is close  to 2.
+  
+  3. Are the ATE and ATT the same in this scenario?
+      + All 3 estimators that are based on matched data, are actually ATT estimators, due to the fact that all clients have been matched successfully and Therefore we are estimating the average casual affect on those clients which is the ATT definition. Additionally, all 3 estimators are unbiased to ATE (=2) >> ATT = ATE. Regarding the Naive estimator, by definition, there is a difference between the ATT to the ATE, but in terms of our execution, `y0` and `y1` distribution are similar by design (same explanatory variables).
+  
+### 6d - Running the same process with N = 2500
+  
+```{r 6b,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+exec <- run_analysis(2500)
+exec$table
+exec$plot
+```
+
+### Interpretation
+
+  4. Conclusions:
+      + **Bias** - same as previous analysis
+      + **Varinace** - The std. has been decreased dramatically - due to the higher sample size.
+      + **Best Estimator** - `LM: Y ~ A + X`, same as previous analysis.
+
+
+*** 
+
+# Question 7A
+## Matching and Subsequent analysis - RHC data {.tabset}
+
+### i - 1:1 Exact Matching
+
+```{r 7i,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+set.seed(10)
+
+find_match <- function(method = 'exact', distance = NULL){
+  match_instance <- MatchIt::matchit(
+    formula = treatment ~ female + age + meanbp1,
+    method = method,
+    distance = distance,
+    data = rhc_data)
+  
+  raw_data <- MatchIt::match.data(match_instance) 
+  
+  df_matches <- raw_data %>% select(id, subclass, labeled_trt, gender, age, meanbp1) %>% 
+    group_by(subclass) %>% filter(n() > 1) %>% mutate(rn = row_number(id))
+  
+  output <- df_matches %>% filter(rn == 1) %>%
+    inner_join(df_matches %>% filter(rn == 2), by='subclass') %>%
+    select(-c('rn.x', 'rn.y'))
+  
+  table <- formattable(output %>% filter(id.x <= 3), align = rep('c', ncol(output)))
+  return(list(t=table, n=nrow(output), df=raw_data))
+}
+
+output1 = find_match(method = 'exact')
+output1$t
+```
+
+* Interpretation:
+   + Matched rows: **__`r output1$n`__**
+   + In this process, **first 3 rows weren't matched**, and therefore we can't determine whether those matches are good. This results does reasonable, due to the strict Exact method which uses the distance metric that match observations only if all confounded variables are the same.
+
+### ii - 1:1 NN Matching, Mahalanobis Distance
+
+```{r 7ii,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+set.seed(10)
+output2 = find_match(method = 'nearest', distance='mahalanobis')
+output2$t
+```
+
+* Interpretation:
+   + Matched rows: **__`r output2$n`__**
+   + It seems that the matched first rows are preety much the same across all relevant columns.
+
+
+### iii - 1:1 Optimal Matching, Mahalanobis distance
+
+```{r 7iii,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+set.seed(10)
+output3 = find_match(method = 'optimal', distance='mahalanobis')
+output3$t
+```
+
+* Interpretation:
+   + Matched rows: **__`r output3$n`__**
+   + Relatively bed matches, first ID wasn't matched at all.
+
+### iv - 1:1 NN Matching, PS Distance
+
+```{r 7iv,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+set.seed(10)
+output4 = find_match(method = 'nearest', distance='logit')
+output4$t
+```
+
+* Interpretation:
+   + Matched rows: **__`r output4$n`__**
+   + Relatively bed matches. As discussed in class, there are cased in which two different clients have same PS distance value while actually their attributes are different. 
+
+### v - 1:1  NN Optimal Matching, PS Distance
+
+```{r 7v,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+set.seed(10)
+output5 = find_match(method = 'optimal', distance='logit')
+output5$t
+```
+
+* Interpretation:
+   + Matched rows: **__`r output5$n`__**
+   + Relatively bed matches. As discussed in class, there are cased in which two different clients have same PS distance value while actually their attributes are different. 
+
+***
+
+# Question 7B
+
+## Selecting the best method{.tabset}
+
+The selected method is **1:1 NN matching, Mahalanobis distance**
+
+### i - 1:1 Exact Matching
+
+```{r 7Bi,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+rhc_data$type <- 'Original Data'
+matched_data <- output1$df %>% mutate(type = 'Matched Data')
+df <- bind_rows(rhc_data, matched_data)
+
+ggplot(df %>% filter(meanbp1 < 750), aes(x=age, y=meanbp1, color=gender, shape=labeled_trt)) +
+  geom_point(size = 1.5) + facet_wrap(~type) + 
+  labs(y = 'Average Blood Pressure (Day 1)',
+       x = 'Age',
+       col = 'Gender',
+       shape = 'Treatment') + 
+  theme_ggcharts() + 
+  theme(axis.text = element_blank(),
+        axis.ticks =  element_blank())
+```
+
+* Interpretation:
+   + Pros: Perfect match.
+   + Cons: Due to numerical features (age, meanbp1), only 4 observations have been matched.
+   + Decision: No go.
+
+### ii - 1:1 NN Matching, Mahalanobis Distance
+
+```{r 7Bii,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+ggplot(output2$df, 
+       aes(x=age, y=meanbp1, color=gender, shape=labeled_trt)) +
+  geom_point(size = 1.5) + 
+  geom_line(aes(group=subclass)) +
+  labs(y = 'Average Blood Pressure (Day 1)',
+       x = 'Age',
+       col = 'Gender',
+       shape = 'Treatment') + 
+  theme_ggcharts() + 
+  theme(axis.text = element_blank(),
+        axis.ticks =  element_blank())
+```
+
+* Interpretation:
+   + Pros: Great balance improvements in feamle, age and meanbp1 features. All observations are matched.
+   + Decision: Go.
+
+### iii - 1:1 Optimal Matching, Mahalanobis distance
+
+```{r 7Biii,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+ggplot(output3$df, 
+       aes(x=age, y=meanbp1, color=gender, shape=labeled_trt)) +
+  geom_point(size = 1.5) + 
+  geom_line(aes(group=subclass)) +
+  labs(y = 'Average Blood Pressure (Day 1)',
+       x = 'Age',
+       col = 'Gender',
+       shape = 'Treatment') + 
+  theme_ggcharts() + 
+  theme(axis.text = element_blank(),
+        axis.ticks =  element_blank())
+```
+
+* Interpretation:
+   + Cons: Bed performance. The balance is not getting improved at all (even getting worse)
+   + Decision: No Go.
+
+### iv - 1:1 NN Matching, PS Distance
+
+```{r 7Biv,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+ggplot(output4$df, 
+       aes(x=age, y=meanbp1, color=gender, shape=labeled_trt)) +
+  geom_point(size = 1.5) + 
+  geom_line(aes(group=subclass)) +
+  labs(y = 'Average Blood Pressure (Day 1)',
+       x = 'Age',
+       col = 'Gender',
+       shape = 'Treatment') + 
+  theme_ggcharts() + 
+  theme(axis.text = element_blank(),
+        axis.ticks =  element_blank())
+```
+
+* Interpretation:
+   + Pros: The balance is getting improved, but the overall effect is less than method (ii). All observations are matched.
+   + Decision: No Go.
+
+### v - 1:1  NN Optimal Matching, PS Distance
+
+```{r 7Bv,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+ggplot(output5$df, 
+       aes(x=age, y=meanbp1, color=gender, shape=labeled_trt)) +
+  geom_point(size = 1.5) + 
+  geom_line(aes(group=subclass)) +
+  labs(y = 'Average Blood Pressure (Day 1)',
+       x = 'Age',
+       col = 'Gender',
+       shape = 'Treatment') + 
+  theme_ggcharts() + 
+  theme(axis.text = element_blank(),
+        axis.ticks =  element_blank())
+```
+
+* Interpretation:
+   + Pros: The balance is getting improved, but the overall effect is less than method (ii). All observations are matched.
+   + Decision: No Go.
+
+***
+
+## Question 7C
+
+For the chosen method, the average difference between the matches is the **ATT estimator**.
+This method match all 2184 observations from the treatment group. All observations that are not part of the treatment group are getting off the dataset. Therefore, the estimated parameter is the treatment affect (= ATT).
+
+***
+
+## Question 7D
+### ATT Estimator
+
+* `M`: Number of paired observations
+* `m`: Pair index
+
+$$
+\hat{ATT} = \frac{1}{M}\sum_{m=1}^{M}(Y_{1m}-Y_{0m})=\frac{1}{M}\sum_{m=1}^{M}d_{m}
+$$
+
+```{r 7D,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+M = 2184
+calcualtor <- function(m){
+  output2$df %>% filter(subclass == m) %>% 
+    summarise(ATT = sum(death[treatment == 1]) - sum(death[treatment == 0]))
+  }
+d = unlist(sapply(seq(1, M), calcualtor))
+ATT_estimator = mean(d)
+sd_ATT_estimator = sqrt((1/M)*(1/(M-1))*sum((d-mean(d))^2))
+CI = c(-1, 1)*qnorm(1-0.05)*sd_ATT_estimator
+```
+
++ ATT Estimator: **__`r ATT_estimator`__**
++ Std. ATT Estimator: **__`r sd_ATT_estimator`__**
++ Asymptotic CI: **__`r CI`__**
+
+## Question 7E
+
+We will estimate the ATT/ ATE using a parametric model. We will use standardization by logistic regression model on the matched data in order to estimate the difference between the expected Y value across treatment groups (treated vs. untreated) for each matched data point. The standardized estimator for ATE/ ATT will be the average difference.
+
+```{r 7E,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
+model_dataset <- output2$df
+logistic_model <- 
+  glm(death ~ treatment + ARF + female + age + meanbp1 + CHF + sepsis + treatment*ARF + treatment*female,
+    family = 'binomial',
+    data = model_dataset)
+
+model_dataset.treat <- model_dataset %>% mutate(treat = 1)
+model_dataset.untreat <- model_dataset %>% mutate(treat = 0)
+
+pred_treat <- predict(object = logistic_model, newdata = model_dataset.treat, type = 'response')
+pred_untreat <- predict(object = logistic_model, newdata = model_dataset.untreat, type = 'response')
+
+ATE_standertized_logistic_model <- mean(pred_treat) - mean(pred_untreat)
+
+N = nrow(model_dataset)
+B = 1000
+alpha = 0.05
+
+bootstraped_logistic_model <- function(x){
+  
+  index <- sample.int(N, replace = T)
+  dataset <- model_dataset[index,]
+  boot_logistic <-  glm(
+    death ~ treatment + ARF + female + age + meanbp1 + CHF + sepsis + treatment*ARF + treatment*female,
+    family = 'binomial',
+    data = model_dataset)
+  
+  dataset.treat <- dataset %>% mutate(treatment = 1)
+  dataset.untreat <- dataset %>% mutate(treatment = 0)
+  
+  pred_treat <- predict(object = boot_logistic, newdata = dataset.treat, type = 'response')
+  pred_untreat <- predict(object = boot_logistic, newdata = dataset.untreat, type = 'response')
+  
+  ATE <- mean(pred_treat) - mean(pred_untreat)
+  return(ATE)
+}
+
+glm_boot_res <- sapply(rep(1, B), bootstraped_logistic_model)
+glm_sd_boot <- sd(glm_boot_res)
+glm_ATE_est_interval <- ATE_standertized_logistic_model + c(-1, 1)*qnorm(1-(alpha/2))*glm_sd_boot
+glm_lower_bound <- quantile(x = glm_boot_res, probs = alpha/2)
+glm_upper_bound <- quantile(x = glm_boot_res, probs = 1-(alpha/2))
+
+glm_df_ci1 <- tibble(upper = glm_ATE_est_interval[2], lower = glm_ATE_est_interval[1]) %>% 
+  melt() %>% mutate(type = 'Asymptotic')
+
+glm_df_ci2 <- tibble(upper = glm_upper_bound, lower = glm_lower_bound) %>% 
+  melt() %>% mutate(type = 'Percentile')
+
+glm_df_ci <- rbind(glm_df_ci1, glm_df_ci2)
+
+tibble(res=glm_boot_res) %>% 
+  ggplot(aes(x=res)) +
+  geom_density(fill= 'pink') + 
+  theme_ggcharts() +   
+  geom_vline(data=glm_df_ci, mapping = aes(xintercept=value, col=type)) +
+  labs(title = 'ATE Estimator',
+       subtitle = 'Bootstrapped Results Distribution',
+       col = 'CI Type',
+       x = 'ATT Esttimator')
+
+```
+
+#### ATE/ ATT Estimator
++ ATT_Estimator : **__`r ATE_standertized_logistic_model`__**
+
+#### Confidence Interval: 
+
+    * **Percentile**:
+      1. Lower = **__`r glm_lower_bound`__**
+      2. Upper = **__`r glm_upper_bound`__**
+      3. Length = **__`r glm_upper_bound-glm_lower_bound`__**
+    
+  * **Asymptotic**:
+    1. Lower = **__`r glm_ATE_est_interval[1]`__**
+    2. Upper = **__`r glm_ATE_est_interval[2]`__**
+    3. Length = **__`r abs(glm_ATE_est_interval[2]-glm_ATE_est_interval[1])`__**

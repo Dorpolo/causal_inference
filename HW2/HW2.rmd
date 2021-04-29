@@ -9,7 +9,6 @@ output:
 
 
 ```{r setup, include=FALSE}
-
 # install required packages
 list.of.packages <- c('dplyr', 'ggplot2', 'ggcharts', 'reshape2','purrr',
                       'formattable', 'gridExtra', 'optmatch', 'MatchIt')
@@ -386,7 +385,7 @@ output5$t
 
 * Interpretation:
    + Matched rows: **__`r output5$n`__**
-   + Relatively bed matches. As discussed in class, there are cased in which two different clients have same PS distance value while actually their attributes are different. 
+   + Relatively bed matches. As discussed in class, there are cased in which two different clients have same PS distance value while actually their attributes are different.
 
 ***
 
@@ -540,18 +539,19 @@ We will estimate the ATT/ ATE using a parametric model. We will use standardizat
 
 ```{r 7E,  fig.height=5, fig.width=6, message=FALSE, warning=FALSE, paged.print=TRUE, fig.align="center"}
 model_dataset <- output2$df
+
 logistic_model <- 
   glm(death ~ treatment + ARF + female + age + meanbp1 + CHF + sepsis + treatment*ARF + treatment*female,
     family = 'binomial',
     data = model_dataset)
 
-model_dataset.treat <- model_dataset %>% mutate(treat = 1)
-model_dataset.untreat <- model_dataset %>% mutate(treat = 0)
+model_dataset.treat <- model_dataset %>% mutate(treatment = 1)
+model_dataset.untreat <- model_dataset %>% mutate(treatment = 0)
 
 pred_treat <- predict(object = logistic_model, newdata = model_dataset.treat, type = 'response')
 pred_untreat <- predict(object = logistic_model, newdata = model_dataset.untreat, type = 'response')
 
-ATE_standertized_logistic_model <- mean(pred_treat) - mean(pred_untreat)
+ATE_standardized_logistic_model <- mean(pred_treat) - mean(pred_untreat)
 
 N = nrow(model_dataset)
 B = 1000
@@ -578,7 +578,7 @@ bootstraped_logistic_model <- function(x){
 
 glm_boot_res <- sapply(rep(1, B), bootstraped_logistic_model)
 glm_sd_boot <- sd(glm_boot_res)
-glm_ATE_est_interval <- ATE_standertized_logistic_model + c(-1, 1)*qnorm(1-(alpha/2))*glm_sd_boot
+glm_ATE_est_interval <- ATE_standardized_logistic_model + c(-1, 1)*qnorm(1-(alpha/2))*glm_sd_boot
 glm_lower_bound <- quantile(x = glm_boot_res, probs = alpha/2)
 glm_upper_bound <- quantile(x = glm_boot_res, probs = 1-(alpha/2))
 
@@ -602,17 +602,17 @@ tibble(res=glm_boot_res) %>%
 
 ```
 
-#### ATE/ ATT Estimator
-+ ATT_Estimator : **__`r ATE_standertized_logistic_model`__**
+#### Logistic Regression - ATE/ ATT Estimator
++ ATT_Estimator : **__`r ATE_standardized_logistic_model`__**
 
-#### Confidence Interval: 
+#### Logistic Regression - Confidence Interval: 
 
-    * **Percentile**:
-      1. Lower = **__`r glm_lower_bound`__**
-      2. Upper = **__`r glm_upper_bound`__**
-      3. Length = **__`r glm_upper_bound-glm_lower_bound`__**
-    
-  * **Asymptotic**:
-    1. Lower = **__`r glm_ATE_est_interval[1]`__**
-    2. Upper = **__`r glm_ATE_est_interval[2]`__**
-    3. Length = **__`r abs(glm_ATE_est_interval[2]-glm_ATE_est_interval[1])`__**
+    + **CI Asymptotic**:
+      1. Lower = **__`r glm_ATE_est_interval[1]`__**
+      2. Upper = **__`r glm_ATE_est_interval[2]`__**
+      3. Length = **__`r abs(glm_ATE_est_interval[2]-glm_ATE_est_interval[1])`__**
+      
+  + **CI Percentile**:
+    1. Lower = **__`r glm_lower_bound`__**
+    2. Upper = **__`r glm_upper_bound`__**
+    3. Length = **__`r glm_upper_bound-glm_lower_bound`__**
